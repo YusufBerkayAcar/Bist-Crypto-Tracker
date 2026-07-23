@@ -1,0 +1,50 @@
+# Android / Kotlin .gitignore
+
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/DALVIK VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+/bin/
+/gen/
+/out/
+/build
+app/build
+
+# Gradle files
+.gradle/
+build/
+*/build/
+*.module
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log Files
+*.log
+
+# Android Studio / IntelliJ IDEA
+.navigation/
+captures/
+.externalNativeBuild
+.cxx/
+*.iml
+.idea/
+!.idea/copyright/
+!.idea/icon.png
+
+# Keystore files
+*.jks
+*.keystore
+
+# External dependencies
+/captures/
+.DS_Store
