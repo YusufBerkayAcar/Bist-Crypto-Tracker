@@ -37,6 +37,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+enum class SortMode {
+    DEFAULT,
+    GAINERS,
+    LOSERS,
+    VOLUME
+}
+
 // Curated modern Slate/Teal color system matching premium FinTech designs
 object BistTheme {
     val Background = Color(0xFF0B0F19)      // Slate 950 deep space blue
@@ -73,8 +80,9 @@ fun MainScreen(viewModel: StockViewModel) {
     var showUrlDialog by remember { mutableStateOf(false) }
     var showAddAlarmDialog by remember { mutableStateOf(false) }
     var selectedStockForAlarm by remember { mutableStateOf<String?>(null) }
-    var currentTab by remember { mutableStateOf(0) } // 0: Favoriler, 1: Hisseler, 2: Alarmlar
+    var currentTab by remember { mutableStateOf(0) } // 0: Favoriler, 1: Hisseler, 2: Kripto, 3: Alarmlar
     var searchQuery by remember { mutableStateOf("") }
+    var selectedSortMode by remember { mutableStateOf(SortMode.DEFAULT) }
     var selectedStockForDetails by remember { mutableStateOf<StockInfo?>(null) }
     var isIndicesExpanded by rememberSaveable { mutableStateOf(true) }
 
@@ -324,44 +332,91 @@ fun MainScreen(viewModel: StockViewModel) {
                 )
             }
 
-            // Search Bar
+            // Search Bar & Sort Options
             if (currentTab == 0 || currentTab == 1 || currentTab == 2) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Ara (Hisse, Coin veya İsim)...", color = BistTheme.TextSecondary) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Ara", tint = BistTheme.TextSecondary) },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Temizle", tint = BistTheme.TextSecondary)
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Ara (Hisse, Coin veya İsim)...", color = BistTheme.TextSecondary) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Ara", tint = BistTheme.TextSecondary) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Temizle", tint = BistTheme.TextSecondary)
+                                }
                             }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = BistTheme.TextPrimary,
-                        unfocusedTextColor = BistTheme.TextPrimary,
-                        focusedContainerColor = BistTheme.CardBackground,
-                        unfocusedContainerColor = BistTheme.CardBackground,
-                        focusedBorderColor = BistTheme.PrimaryLight,
-                        unfocusedBorderColor = BistTheme.CardBorder
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = BistTheme.TextPrimary,
+                            unfocusedTextColor = BistTheme.TextPrimary,
+                            focusedContainerColor = BistTheme.CardBackground,
+                            unfocusedContainerColor = BistTheme.CardBackground,
+                            focusedBorderColor = BistTheme.PrimaryLight,
+                            unfocusedBorderColor = BistTheme.CardBorder
+                        )
                     )
-                )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Sıralama Çipleri (Sorting Chips)
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val sortOptions = listOf(
+                            "Tümü" to SortMode.DEFAULT,
+                            "🚀 En Çok Yükselenler" to SortMode.GAINERS,
+                            "🔻 En Çok Düşenler" to SortMode.LOSERS,
+                            "📊 Yüksek Hacimliler" to SortMode.VOLUME
+                        )
+                        items(sortOptions) { (label, mode) ->
+                            val isSelected = selectedSortMode == mode
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedSortMode = mode },
+                                label = { Text(label, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = BistTheme.Primary,
+                                    selectedLabelColor = Color.White,
+                                    containerColor = BistTheme.CardBackground,
+                                    labelColor = BistTheme.TextSecondary
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = isSelected,
+                                    borderColor = BistTheme.CardBorder,
+                                    selectedBorderColor = BistTheme.PrimaryLight
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+                    }
+                }
             }
 
             // Tab Content
             Box(modifier = Modifier.weight(1f)) {
+                fun applySorting(list: List<StockInfo>): List<StockInfo> {
+                    return when (selectedSortMode) {
+                        SortMode.GAINERS -> list.sortedByDescending { it.degisim }
+                        SortMode.LOSERS -> list.sortedBy { it.degisim }
+                        SortMode.VOLUME -> list.sortedByDescending { it.hacim }
+                        SortMode.DEFAULT -> list
+                    }
+                }
+
                 when (currentTab) {
                     0 -> { // Favoriler
-                        val favStocks = (stocks + indices + cryptos).filter { 
+                        val rawFav = (stocks + indices + cryptos).filter { 
                             it.hisse.uppercase().trim() in favorites &&
                             (it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true))
                         }
+                        val favStocks = applySorting(rawFav)
+
                         if (favStocks.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -380,7 +435,7 @@ fun MainScreen(viewModel: StockViewModel) {
                                 contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(favStocks) { stock ->
+                                items(favStocks, key = { it.hisse }) { stock ->
                                     StockCard(
                                         stock = stock,
                                         isFavorite = true,
@@ -396,16 +451,18 @@ fun MainScreen(viewModel: StockViewModel) {
                         }
                     }
                     1 -> { // Tüm Hisseler
-                        val filteredStocks = stocks.filter {
+                        val rawStocks = stocks.filter {
                             it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true)
                         }
+                        val filteredStocks = applySorting(rawStocks)
+
                         if (stocks.isEmpty() && isRefreshing) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = BistTheme.PrimaryLight)
                             }
                         } else if (stocks.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Hisse bulunamadı. Lütfen tablonuzu ve URL'inizi kontrol edin.", color = BistTheme.TextSecondary)
+                                Text("Hisse yükleniyor...", color = BistTheme.TextSecondary)
                             }
                         } else if (filteredStocks.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -416,7 +473,7 @@ fun MainScreen(viewModel: StockViewModel) {
                                 contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(filteredStocks) { stock ->
+                                items(filteredStocks, key = { it.hisse }) { stock ->
                                     val isFav = stock.hisse.uppercase().trim() in favorites
                                     StockCard(
                                         stock = stock,
@@ -433,16 +490,18 @@ fun MainScreen(viewModel: StockViewModel) {
                         }
                     }
                     2 -> { // Kripto Paralar
-                        val filteredCryptos = cryptos.filter {
+                        val rawCryptos = cryptos.filter {
                             it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true)
                         }
+                        val filteredCryptos = applySorting(rawCryptos)
+
                         if (cryptos.isEmpty() && isRefreshing) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = BistTheme.PrimaryLight)
                             }
                         } else if (cryptos.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Kripto para bulunamadı. Lütfen Sayfa3/Kripto tablonuzu kontrol edin.", color = BistTheme.TextSecondary)
+                                Text("Kripto para yükleniyor...", color = BistTheme.TextSecondary)
                             }
                         } else if (filteredCryptos.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -453,7 +512,7 @@ fun MainScreen(viewModel: StockViewModel) {
                                 contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(filteredCryptos) { stock ->
+                                items(filteredCryptos, key = { it.hisse }) { stock ->
                                     val isFav = stock.hisse.uppercase().trim() in favorites
                                     StockCard(
                                         stock = stock,
@@ -471,16 +530,47 @@ fun MainScreen(viewModel: StockViewModel) {
                     }
                     3 -> { // Alarmlar
                         if (alarms.isEmpty()) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Kurulu alarm bulunmuyor. Yeni alarm ekleyebilirsiniz.", color = BistTheme.TextSecondary)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Notifications,
+                                        contentDescription = "Alarm Yok",
+                                        tint = BistTheme.TextSecondary.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(64.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "Kurulu Fiyat Alarmı Bulunmuyor",
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BistTheme.TextPrimary,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Sağ alttaki + butonuna basarak istediğiniz hisse veya kripto para için alarm oluşturabilirsiniz.",
+                                        fontSize = 13.sp,
+                                        color = BistTheme.TextSecondary,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        lineHeight = 18.sp
+                                    )
+                                }
                             }
                         } else {
                             LazyColumn(
                                 contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(alarms) { alarm ->
-                                    val stockInfo = stocks.find { it.hisse.uppercase().trim() == alarm.hisse.uppercase().trim() }
+                                items(alarms, key = { it.id }) { alarm ->
+                                    val stockInfo = (stocks + indices + cryptos).find { it.hisse.uppercase().trim() == alarm.hisse.uppercase().trim() }
                                     AlarmCard(
                                         alarm = alarm,
                                         stockInfo = stockInfo,

@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
+import com.example.bist.YahooFinanceRepository.bistStocksMap
+import com.example.bist.YahooFinanceRepository.indicesMap
+import com.example.bist.YahooFinanceRepository.cryptosMap
 
 class StockViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -51,11 +54,27 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     init {
         _alarms.value = alarmPrefs.getAlarms()
         _favorites.value = alarmPrefs.getFavorites()
+
+        // 1. Önce cihazdaki kaydedilmiş son verileri anında yükle (0 milisaniye bekleme)
+        loadCachedStocks()
         
-        // Start polling when ViewModel is created
+        // 2. Ardından canlı verileri çekmeye başla
         startPolling()
         // Sync WorkManager according to active alarms
         syncBackgroundWorker()
+    }
+
+    private fun loadCachedStocks() {
+        val cached = alarmPrefs.getLastStocks()
+        if (cached.isNotEmpty()) {
+            val cachedBist = cached.filter { info -> bistStocksMap.containsKey(info.hisse) }
+            val cachedIndices = cached.filter { info -> indicesMap.values.any { it.first == info.hisse } || info.hisse == "XAU/TRY" }
+            val cachedCryptos = cached.filter { info -> cryptosMap.containsKey(info.hisse + "-USD") || cryptosMap.containsKey(info.hisse) }
+
+            if (cachedBist.isNotEmpty()) _stocks.value = cachedBist
+            if (cachedIndices.isNotEmpty()) _indices.value = cachedIndices
+            if (cachedCryptos.isNotEmpty()) _cryptos.value = cachedCryptos
+        }
     }
 
     fun startPolling() {
@@ -77,18 +96,20 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
             _isRefreshing.value = true
             _errorMessage.value = null
             try {
-                val stocksDeferred = async { YahooFinanceRepository.fetchBistStocks() }
-                val indicesDeferred = async { YahooFinanceRepository.fetchIndices() }
-                val cryptosDeferred = async { YahooFinanceRepository.fetchCryptos() }
-                
-                val stocksResponse = stocksDeferred.await()
-                val indicesResponse = indicesDeferred.await()
-                val cryptosResponse = cryptosDeferred.await()
-
-                _stocks.value = stocksResponse
+                // Makro göstergeleri önce getir (en hızlı 6 istek, anında ekrana basılsın)
+                val indicesResponse = YahooFinanceRepository.fetchIndices()
                 _indices.value = indicesResponse
+
+                // Ardından BİST ve Kripto verilerini paralel olarak yükle
+                val stocksDeferred = async { YahooFinanceRepository.fetchBistStocks() }
+                val cryptosDeferred = async { YahooFinanceRepository.fetchCryptos() }
+
+                val stocksResponse = stocksDeferred.await()
+                _stocks.value = stocksResponse
+
+                val cryptosResponse = cryptosDeferred.await()
                 _cryptos.value = cryptosResponse
-                
+
                 alarmPrefs.saveLastStocks(stocksResponse + indicesResponse + cryptosResponse)
                 BistAppWidgetProvider.updateWidget(getApplication())
             } catch (e: Exception) {
