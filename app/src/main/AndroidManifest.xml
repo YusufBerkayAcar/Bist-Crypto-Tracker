@@ -32,6 +32,8 @@
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="com.example.bist.ACTION_WIDGET_REFRESH" />
+                <action android:name="com.example.bist.ACTION_WIDGET_SWITCH_FAVORITES" />
+                <action android:name="com.example.bist.ACTION_WIDGET_SWITCH_PORTFOLIO" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

@@ -1,6 +1,7 @@
 package com.example.bist
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -445,22 +446,58 @@ fun MainScreen(viewModel: StockViewModel) {
 
             // Tab Content
             Box(modifier = Modifier.weight(1f)) {
-                fun applySorting(list: List<StockInfo>): List<StockInfo> {
-                    return when (selectedSortMode) {
-                        SortMode.GAINERS -> list.sortedByDescending { it.degisim }
-                        SortMode.LOSERS -> list.sortedBy { it.degisim }
-                        SortMode.VOLUME -> list.sortedByDescending { it.hacim }
-                        SortMode.DEFAULT -> list
+                // Performans Optimizasyonu: Lazy Tab Rendering
+                // Filtreleme ve sıralama SADECE aktif sekmede hesaplanır, diğer sekmelerde boş liste döner.
+                // Bu sayede kullanılmayan sekmelerde sıfır CPU harcanır.
+
+                val favStocks = remember(currentTab, searchQuery, selectedSortMode, stocks, indices, cryptos, favorites) {
+                    if (currentTab != 0) emptyList()
+                    else {
+                        val rawFav = (stocks + indices + cryptos).filter { 
+                            it.hisse.uppercase().trim() in favorites &&
+                            (it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true))
+                        }
+                        when (selectedSortMode) {
+                            SortMode.GAINERS -> rawFav.sortedByDescending { it.degisim }
+                            SortMode.LOSERS -> rawFav.sortedBy { it.degisim }
+                            SortMode.VOLUME -> rawFav.sortedByDescending { it.hacim }
+                            SortMode.DEFAULT -> rawFav
+                        }
+                    }
+                }
+
+                val filteredStocks = remember(currentTab, searchQuery, selectedSortMode, stocks) {
+                    if (currentTab != 1) emptyList()
+                    else {
+                        val rawStocks = stocks.filter {
+                            it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true)
+                        }
+                        when (selectedSortMode) {
+                            SortMode.GAINERS -> rawStocks.sortedByDescending { it.degisim }
+                            SortMode.LOSERS -> rawStocks.sortedBy { it.degisim }
+                            SortMode.VOLUME -> rawStocks.sortedByDescending { it.hacim }
+                            SortMode.DEFAULT -> rawStocks
+                        }
+                    }
+                }
+
+                val filteredCryptos = remember(currentTab, searchQuery, selectedSortMode, cryptos) {
+                    if (currentTab != 2) emptyList()
+                    else {
+                        val rawCryptos = cryptos.filter {
+                            it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true)
+                        }
+                        when (selectedSortMode) {
+                            SortMode.GAINERS -> rawCryptos.sortedByDescending { it.degisim }
+                            SortMode.LOSERS -> rawCryptos.sortedBy { it.degisim }
+                            SortMode.VOLUME -> rawCryptos.sortedByDescending { it.hacim }
+                            SortMode.DEFAULT -> rawCryptos
+                        }
                     }
                 }
 
                 when (currentTab) {
                     0 -> { // Favoriler
-                        val rawFav = (stocks + indices + cryptos).filter { 
-                            it.hisse.uppercase().trim() in favorites &&
-                            (it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true))
-                        }
-                        val favStocks = applySorting(rawFav)
 
                         if (favStocks.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -496,11 +533,6 @@ fun MainScreen(viewModel: StockViewModel) {
                         }
                     }
                     1 -> { // Tüm Hisseler
-                        val rawStocks = stocks.filter {
-                            it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true)
-                        }
-                        val filteredStocks = applySorting(rawStocks)
-
                         if (stocks.isEmpty() && isRefreshing) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = BistTheme.PrimaryLight)
@@ -535,11 +567,6 @@ fun MainScreen(viewModel: StockViewModel) {
                         }
                     }
                     2 -> { // Kripto Paralar
-                        val rawCryptos = cryptos.filter {
-                            it.hisse.contains(searchQuery, ignoreCase = true) || it.sirket.contains(searchQuery, ignoreCase = true)
-                        }
-                        val filteredCryptos = applySorting(rawCryptos)
-
                         if (cryptos.isEmpty() && isRefreshing) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = BistTheme.PrimaryLight)
@@ -919,27 +946,33 @@ fun StockCard(
                 )
             }
 
-            // Trend Graphic (Sparkline)
+            // Trend Graphic (Sparkline) — Path Caching Optimizasyonu
             Box(
                 modifier = Modifier
                     .weight(0.8f)
                     .padding(horizontal = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
+                // Path hesaplamasını remember ile önbelleğe al (kaydırmada sıfır CPU yükü)
+                val trendPath = remember(stock.trend, stock.degisim) {
+                    stock.trend to stock.degisim // sadece key olarak kullan, path Canvas içinde çizilecek
+                }
+
                 Canvas(modifier = Modifier.size(50.dp, 22.dp)) {
                     val width = size.width
                     val height = size.height
                     val path = androidx.compose.ui.graphics.Path()
 
-                    if (stock.trend.size > 1) {
-                        val minVal = stock.trend.minOrNull() ?: 0.0
-                        val maxVal = stock.trend.maxOrNull() ?: 0.0
+                    if (trendPath.first.size > 1) {
+                        val trendData = trendPath.first
+                        val minVal = trendData.minOrNull() ?: 0.0
+                        val maxVal = trendData.maxOrNull() ?: 0.0
                         val delta = maxVal - minVal
 
                         if (delta > 0.0) {
-                            val stepX = width / (stock.trend.size - 1)
-                            for (index in stock.trend.indices) {
-                                val price = stock.trend[index]
+                            val stepX = width / (trendData.size - 1)
+                            for (index in trendData.indices) {
+                                val price = trendData[index]
                                 val x = index * stepX
                                 val normalizedY = (price - minVal) / delta
                                 val y = (height - (normalizedY * height * 0.8f + height * 0.1f)).toFloat()
@@ -955,8 +988,9 @@ fun StockCard(
                         }
                     } else {
                         // Mock curve fallback if trend data is not available yet
-                        path.moveTo(0f, height * if (stock.degisim >= 0) 0.8f else 0.2f)
-                        if (stock.degisim >= 0) {
+                        val degisim = trendPath.second
+                        path.moveTo(0f, height * if (degisim >= 0) 0.8f else 0.2f)
+                        if (degisim >= 0) {
                             path.quadraticTo(width * 0.3f, height * 0.7f, width * 0.5f, height * 0.4f)
                             path.quadraticTo(width * 0.75f, height * 0.1f, width, height * 0.15f)
                         } else {
@@ -967,7 +1001,7 @@ fun StockCard(
 
                     drawPath(
                         path = path,
-                        color = if (stock.degisim >= 0) BistTheme.Green else BistTheme.Red,
+                        color = if (trendPath.second >= 0) BistTheme.Green else BistTheme.Red,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(
                             width = 2.dp.toPx(),
                             cap = androidx.compose.ui.graphics.StrokeCap.Round
@@ -1197,7 +1231,6 @@ fun AddAlarmDialog(
     var valueText by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(AlarmType.PRICE_ABOVE) }
 
-    var expanded by remember { mutableStateOf(false) }
     val filteredSuggestions = remember(stockCode) {
         if (stockCode.isEmpty()) emptyList()
         else allStocks.filter { 
@@ -1221,13 +1254,10 @@ fun AddAlarmDialog(
                         color = BistTheme.Accent
                     )
                 } else {
-                    Box {
+                    Column {
                         OutlinedTextField(
                             value = stockCode,
-                            onValueChange = { 
-                                stockCode = it 
-                                expanded = true
-                            },
+                            onValueChange = { stockCode = it },
                             label = { Text("Hisse veya Kripto Kodu (Örn: THYAO, BTC-USD)") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
@@ -1241,21 +1271,45 @@ fun AddAlarmDialog(
                             )
                         )
 
-                        DropdownMenu(
-                            expanded = expanded && filteredSuggestions.isNotEmpty(),
-                            onDismissRequest = { expanded = false },
-                            modifier = Modifier
-                                .fillMaxWidth(0.9f)
-                                .background(BistTheme.CardBackground)
-                        ) {
-                            filteredSuggestions.forEach { stock ->
-                                DropdownMenuItem(
-                                    text = { Text("${stock.hisse} - ${stock.sirket}", color = BistTheme.TextPrimary, fontSize = 13.sp) },
-                                    onClick = {
-                                        stockCode = stock.hisse
-                                        expanded = false
+                        if (filteredSuggestions.isNotEmpty() && stockCode.isNotEmpty()) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = BistTheme.Background),
+                                border = BorderStroke(0.5.dp, BistTheme.CardBorder)
+                            ) {
+                                Column {
+                                    filteredSuggestions.forEach { stock ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { stockCode = stock.hisse }
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = stock.hisse,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = BistTheme.Accent
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = stock.sirket,
+                                                fontSize = 12.sp,
+                                                color = BistTheme.TextSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        if (stock != filteredSuggestions.last()) {
+                                            HorizontalDivider(color = BistTheme.CardBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+                                        }
                                     }
-                                )
+                                }
                             }
                         }
                     }
@@ -1772,7 +1826,6 @@ fun AddPortfolioDialog(
     var amountText by remember { mutableStateOf("") }
     var buyPriceText by remember { mutableStateOf("") }
 
-    var expanded by remember { mutableStateOf(false) }
     val filteredSuggestions = remember(symbol) {
         if (symbol.isEmpty()) emptyList()
         else allStocks.filter { 
@@ -1788,13 +1841,10 @@ fun AddPortfolioDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box {
+                Column {
                     OutlinedTextField(
                         value = symbol,
-                        onValueChange = { 
-                            symbol = it 
-                            expanded = true
-                        },
+                        onValueChange = { symbol = it },
                         label = { Text("Hisse veya Kripto Kodu (Örn: THYAO, BTC-USD)") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -1808,22 +1858,48 @@ fun AddPortfolioDialog(
                         )
                     )
 
-                    DropdownMenu(
-                        expanded = expanded && filteredSuggestions.isNotEmpty(),
-                        onDismissRequest = { expanded = false },
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .background(BistTheme.CardBackground)
-                    ) {
-                        filteredSuggestions.forEach { stock ->
-                            DropdownMenuItem(
-                                text = { Text("${stock.hisse} - ${stock.sirket}", color = BistTheme.TextPrimary, fontSize = 13.sp) },
-                                onClick = {
-                                    symbol = stock.hisse
-                                    buyPriceText = stock.fiyat.toString()
-                                    expanded = false
+                    if (filteredSuggestions.isNotEmpty() && symbol.isNotEmpty()) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = BistTheme.Background),
+                            border = BorderStroke(0.5.dp, BistTheme.CardBorder)
+                        ) {
+                            Column {
+                                filteredSuggestions.forEach { stock ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                symbol = stock.hisse
+                                                buyPriceText = String.format(java.util.Locale.US, "%.2f", stock.fiyat)
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = stock.hisse,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = BistTheme.Accent
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = stock.sirket,
+                                            fontSize = 12.sp,
+                                            color = BistTheme.TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (stock != filteredSuggestions.last()) {
+                                        HorizontalDivider(color = BistTheme.CardBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+                                    }
                                 }
-                            )
+                            }
                         }
                     }
                 }

@@ -121,4 +121,13 @@ class AlarmPreferences(context: Context) {
         current.removeAll { it.id == itemId }
         savePortfolio(current)
     }
+
+    // Widget Mod Tercihi (favorites / portfolio)
+    fun getWidgetMode(): String {
+        return prefs.getString("key_widget_mode", "favorites") ?: "favorites"
+    }
+
+    fun setWidgetMode(mode: String) {
+        prefs.edit().putString("key_widget_mode", mode).apply()
+    }
 }

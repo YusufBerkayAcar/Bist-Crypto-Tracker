@@ -1,8 +1,10 @@
 package com.example.bist
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 import java.util.UUID
 
+@Immutable
 data class StockInfo(
     @SerializedName("hisse") val hisse: String,
     @SerializedName("sirket") val sirket: String,
@@ -19,6 +21,7 @@ enum class AlarmType {
     CHANGE_BELOW  // Günlük değişim yüzdesi belirlenen değerin altında (örn. -3%)
 }
 
+@Immutable
 data class StockAlarm(
     val id: String = UUID.randomUUID().toString(),
     val hisse: String,
@@ -33,6 +36,7 @@ data class SingleTrendResponse(
     @SerializedName("dates") val dates: List<String> = emptyList()
 )
 
+@Immutable
 data class PortfolioItem(
     val id: String = UUID.randomUUID().toString(),
     val symbol: String,          // Örn: THYAO veya BTC-USD
