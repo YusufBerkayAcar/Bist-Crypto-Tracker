@@ -93,4 +93,32 @@ class AlarmPreferences(context: Context) {
         val stocksJson = gson.toJson(stocks)
         prefs.edit().putString(KEY_LAST_STOCKS, stocksJson).apply()
     }
+
+    // Portföy İşlemleri
+    fun getPortfolio(): List<PortfolioItem> {
+        val portfolioJson = prefs.getString("key_portfolio", null) ?: return emptyList()
+        return try {
+            val type = object : TypeToken<List<PortfolioItem>>() {}.type
+            gson.fromJson(portfolioJson, type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun savePortfolio(portfolio: List<PortfolioItem>) {
+        val json = gson.toJson(portfolio)
+        prefs.edit().putString("key_portfolio", json).apply()
+    }
+
+    fun addPortfolioItem(item: PortfolioItem) {
+        val current = getPortfolio().toMutableList()
+        current.add(item)
+        savePortfolio(current)
+    }
+
+    fun deletePortfolioItem(itemId: String) {
+        val current = getPortfolio().toMutableList()
+        current.removeAll { it.id == itemId }
+        savePortfolio(current)
+    }
 }

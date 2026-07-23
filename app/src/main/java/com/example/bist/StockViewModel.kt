@@ -37,6 +37,9 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     private val _alarms = MutableStateFlow<List<StockAlarm>>(emptyList())
     val alarms: StateFlow<List<StockAlarm>> = _alarms.asStateFlow()
 
+    private val _portfolio = MutableStateFlow<List<PortfolioItem>>(emptyList())
+    val portfolio: StateFlow<List<PortfolioItem>> = _portfolio.asStateFlow()
+
     private val _webAppUrl = MutableStateFlow("")
     val webAppUrl: StateFlow<String> = _webAppUrl.asStateFlow()
 
@@ -54,6 +57,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     init {
         _alarms.value = alarmPrefs.getAlarms()
         _favorites.value = alarmPrefs.getFavorites()
+        _portfolio.value = alarmPrefs.getPortfolio()
 
         // 1. Önce cihazdaki kaydedilmiş son verileri anında yükle (0 milisaniye bekleme)
         loadCachedStocks()
@@ -154,6 +158,21 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         val updated = alarmPrefs.toggleFavorite(hisseCode)
         _favorites.value = updated
         BistAppWidgetProvider.updateWidget(getApplication())
+    }
+
+    fun addPortfolioItem(symbol: String, amount: Double, buyPrice: Double) {
+        val item = PortfolioItem(
+            symbol = symbol.uppercase().trim(),
+            amount = amount,
+            buyPrice = buyPrice
+        )
+        alarmPrefs.addPortfolioItem(item)
+        _portfolio.value = alarmPrefs.getPortfolio()
+    }
+
+    fun deletePortfolioItem(itemId: String) {
+        alarmPrefs.deletePortfolioItem(itemId)
+        _portfolio.value = alarmPrefs.getPortfolio()
     }
 
     private fun syncBackgroundWorker() {

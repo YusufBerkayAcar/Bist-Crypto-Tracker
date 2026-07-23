@@ -80,11 +80,18 @@ fun MainScreen(viewModel: StockViewModel) {
     var showUrlDialog by remember { mutableStateOf(false) }
     var showAddAlarmDialog by remember { mutableStateOf(false) }
     var selectedStockForAlarm by remember { mutableStateOf<String?>(null) }
-    var currentTab by remember { mutableStateOf(0) } // 0: Favoriler, 1: Hisseler, 2: Kripto, 3: Alarmlar
+    var currentTab by remember { mutableStateOf(0) } // 0: Favoriler, 1: Hisseler, 2: Kripto, 3: Alarmlar, 4: Portföy
     var searchQuery by remember { mutableStateOf("") }
     var selectedSortMode by remember { mutableStateOf(SortMode.DEFAULT) }
     var selectedStockForDetails by remember { mutableStateOf<StockInfo?>(null) }
     var isIndicesExpanded by rememberSaveable { mutableStateOf(true) }
+
+    val portfolio by viewModel.portfolio.collectAsState()
+    var showAddPortfolioDialog by remember { mutableStateOf(false) }
+
+    // Silme Onay Diyalogları için State'ler
+    var alarmToDelete by remember { mutableStateOf<StockAlarm?>(null) }
+    var portfolioItemToDelete by remember { mutableStateOf<PortfolioItem?>(null) }
 
     LaunchedEffect(selectedStockForDetails) {
         selectedStockForDetails?.let { stock ->
@@ -99,7 +106,7 @@ fun MainScreen(viewModel: StockViewModel) {
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        "BIST ALARMLAR",
+                        "BIST & KRİPTO TAKİP",
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 1.2.sp,
                         color = BistTheme.TextPrimary,
@@ -110,8 +117,8 @@ fun MainScreen(viewModel: StockViewModel) {
                     if (isRefreshing) {
                         CircularProgressIndicator(
                             modifier = Modifier
-                                .size(36.dp)
-                                .padding(6.dp),
+                                .padding(end = 16.dp)
+                                .size(20.dp),
                             color = BistTheme.PrimaryLight,
                             strokeWidth = 2.5.dp
                         )
@@ -127,7 +134,7 @@ fun MainScreen(viewModel: StockViewModel) {
             )
         },
         floatingActionButton = {
-            if (currentTab == 3) {
+            if (currentTab == 3) { // Alarmlar
                 FloatingActionButton(
                     onClick = {
                         selectedStockForAlarm = null
@@ -135,10 +142,40 @@ fun MainScreen(viewModel: StockViewModel) {
                     },
                     containerColor = BistTheme.Primary,
                     contentColor = Color.White,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
+                    modifier = Modifier
+                        .height(42.dp)
+                        .padding(bottom = 4.dp, end = 4.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Alarm Ekle")
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Alarm Ekle", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            } else if (currentTab == 4) { // Portföy
+                FloatingActionButton(
+                    onClick = { showAddPortfolioDialog = true },
+                    containerColor = BistTheme.Green,
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
+                    modifier = Modifier
+                        .height(42.dp)
+                        .padding(bottom = 4.dp, end = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Varlık Ekle", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
             }
         }
@@ -287,10 +324,11 @@ fun MainScreen(viewModel: StockViewModel) {
             // Navigation Tabs
             val favorites by viewModel.favorites.collectAsState()
 
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = currentTab,
                 containerColor = BistTheme.Background,
                 contentColor = BistTheme.PrimaryLight,
+                edgePadding = 16.dp,
                 indicator = { tabPositions ->
                     TabRowDefaults.SecondaryIndicator(
                         modifier = Modifier.tabIndicatorOffset(tabPositions[currentTab]),
@@ -328,6 +366,13 @@ fun MainScreen(viewModel: StockViewModel) {
                     onClick = { currentTab = 3 },
                     text = { Text("Alarmlar (${alarms.size})", fontWeight = FontWeight.Bold) },
                     selectedContentColor = BistTheme.Accent,
+                    unselectedContentColor = BistTheme.TextSecondary
+                )
+                Tab(
+                    selected = currentTab == 4,
+                    onClick = { currentTab = 4 },
+                    text = { Text("💼 Portföy (${portfolio.size})", fontWeight = FontWeight.Bold) },
+                    selectedContentColor = BistTheme.Green,
                     unselectedContentColor = BistTheme.TextSecondary
                 )
             }
@@ -566,7 +611,7 @@ fun MainScreen(viewModel: StockViewModel) {
                             }
                         } else {
                             LazyColumn(
-                                contentPadding = PaddingValues(16.dp),
+                                contentPadding = PaddingValues(top = 16.dp, start = 16.dp, end = 16.dp, bottom = 88.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 items(alarms, key = { it.id }) { alarm ->
@@ -575,7 +620,138 @@ fun MainScreen(viewModel: StockViewModel) {
                                         alarm = alarm,
                                         stockInfo = stockInfo,
                                         onToggle = { viewModel.toggleAlarmActive(alarm.id) },
-                                        onDelete = { viewModel.deleteAlarm(alarm.id) }
+                                        onDelete = { alarmToDelete = alarm }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    4 -> { // Portföy
+                        if (portfolio.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Portföy Boş",
+                                        tint = BistTheme.TextSecondary.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(64.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "Portföyünüzde Varlık Bulunmuyor",
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = BistTheme.TextPrimary,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Sağ alttaki yeşil + butonuna basarak aldığınız hisse veya kripto paraları ekleyebilir, canlı Kar/Zarar durumunuzu takip edebilirsiniz.",
+                                        fontSize = 13.sp,
+                                        color = BistTheme.TextSecondary,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        lineHeight = 18.sp
+                                    )
+                                }
+                            }
+                        } else {
+                            val allStocks = stocks + indices + cryptos
+                            
+                            // Toplam maliyet, mevcut değer ve Kar/Zarar hesapları
+                            var totalCostTL = 0.0
+                            var currentValueTL = 0.0
+
+                            portfolio.forEach { item ->
+                                val currentStock = allStocks.find { 
+                                    it.hisse.uppercase().trim() == item.symbol.uppercase().trim() ||
+                                    "${it.hisse}-USD".uppercase().trim() == item.symbol.uppercase().trim()
+                                }
+                                val currentPrice = currentStock?.fiyat ?: item.buyPrice
+                                totalCostTL += (item.amount * item.buyPrice)
+                                currentValueTL += (item.amount * currentPrice)
+                            }
+
+                            val totalProfitTL = currentValueTL - totalCostTL
+                            val totalProfitPercent = if (totalCostTL > 0) (totalProfitTL / totalCostTL) * 100.0 else 0.0
+
+                            LazyColumn(
+                                contentPadding = PaddingValues(top = 16.dp, start = 16.dp, end = 16.dp, bottom = 88.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Portföy Genel Özet Kartı
+                                item {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .border(1.dp, BistTheme.CardBorder, RoundedCornerShape(20.dp)),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = BistTheme.CardBackground
+                                        )
+                                    ) {
+                                        Column(modifier = Modifier.padding(18.dp)) {
+                                            Text(
+                                                "TOPLAM PORTFÖY DEĞERİ",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = BistTheme.TextSecondary,
+                                                letterSpacing = 0.8.sp
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                "${String.format(java.util.Locale.US, "%.2f", currentValueTL)} ₺",
+                                                fontSize = 26.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = BistTheme.TextPrimary
+                                            )
+
+                                            Spacer(modifier = Modifier.height(14.dp))
+                                            HorizontalDivider(color = BistTheme.CardBorder, thickness = 0.8.dp)
+                                            Spacer(modifier = Modifier.height(14.dp))
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column {
+                                                    Text("TOPLAM MALİYET", fontSize = 10.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                                                    Text("${String.format(java.util.Locale.US, "%.2f", totalCostTL)} ₺", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = BistTheme.TextPrimary)
+                                                }
+
+                                                Column(horizontalAlignment = Alignment.End) {
+                                                    Text("TOPLAM KÂR / ZARAR", fontSize = 10.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                                                    val isPositive = totalProfitTL >= 0
+                                                    val profitColor = if (isPositive) BistTheme.Green else BistTheme.Red
+                                                    val sign = if (isPositive) "+" else ""
+                                                    Text(
+                                                        "$sign${String.format(java.util.Locale.US, "%.2f", totalProfitTL)} ₺ (%$sign${String.format(java.util.Locale.US, "%.2f", totalProfitPercent)})",
+                                                        fontSize = 15.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = profitColor
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                items(portfolio, key = { it.id }) { item ->
+                                    val currentStock = allStocks.find { 
+                                        it.hisse.uppercase().trim() == item.symbol.uppercase().trim() ||
+                                        "${it.hisse}-USD".uppercase().trim() == item.symbol.uppercase().trim()
+                                    }
+                                    PortfolioCard(
+                                        item = item,
+                                        currentStock = currentStock,
+                                        onDelete = { portfolioItemToDelete = item }
                                     )
                                 }
                             }
@@ -584,43 +760,106 @@ fun MainScreen(viewModel: StockViewModel) {
                 }
             }
         }
-    }
 
-    // Dialogs
-    if (showUrlDialog) {
-        UrlSettingDialog(
-            currentUrl = webAppUrl,
-            onDismiss = { showUrlDialog = false },
-            onSave = { newUrl ->
-                viewModel.updateWebAppUrl(newUrl)
-                showUrlDialog = false
-            }
-        )
-    }
+        // Dialogs
+        if (showUrlDialog) {
+            UrlSettingDialog(
+                currentUrl = webAppUrl,
+                onDismiss = { showUrlDialog = false },
+                onSave = { newUrl ->
+                    viewModel.updateWebAppUrl(newUrl)
+                    showUrlDialog = false
+                }
+            )
+        }
 
-    if (showAddAlarmDialog) {
-        AddAlarmDialog(
-            preselectedStock = selectedStockForAlarm,
-            stocksList = (stocks + indices + cryptos).map { it.hisse },
-            onDismiss = { showAddAlarmDialog = false },
-            onSave = { hisse, type, value ->
-                viewModel.addAlarm(hisse, type, value)
-                showAddAlarmDialog = false
-            }
-        )
-    }
+        if (showAddAlarmDialog) {
+            AddAlarmDialog(
+                preselectedStock = selectedStockForAlarm,
+                allStocks = stocks + indices + cryptos,
+                onDismiss = { showAddAlarmDialog = false },
+                onSave = { hisse, type, value ->
+                    viewModel.addAlarm(hisse, type, value)
+                    showAddAlarmDialog = false
+                }
+            )
+        }
 
-    if (selectedStockForDetails != null) {
-        StockDetailsDialog(
-            stock = selectedStockForDetails!!,
-            viewModel = viewModel,
-            onDismiss = { selectedStockForDetails = null },
-            onAddAlarmClick = {
-                selectedStockForAlarm = selectedStockForDetails!!.hisse
-                selectedStockForDetails = null
-                showAddAlarmDialog = true
-            }
-        )
+        if (showAddPortfolioDialog) {
+            AddPortfolioDialog(
+                allStocks = stocks + indices + cryptos,
+                onDismiss = { showAddPortfolioDialog = false },
+                onSave = { symbol, amount, buyPrice ->
+                    viewModel.addPortfolioItem(symbol, amount, buyPrice)
+                    showAddPortfolioDialog = false
+                }
+            )
+        }
+
+        if (alarmToDelete != null) {
+            AlertDialog(
+                onDismissRequest = { alarmToDelete = null },
+                containerColor = BistTheme.CardBackground,
+                title = { Text("Alarmı Sil", color = BistTheme.TextPrimary, fontWeight = FontWeight.Bold) },
+                text = { Text("${alarmToDelete!!.hisse} için kurulan alarmı silmek istediğinize emin misiniz?", color = BistTheme.TextSecondary) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteAlarm(alarmToDelete!!.id)
+                            alarmToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BistTheme.Red),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Sil", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { alarmToDelete = null }) {
+                        Text("İptal", color = BistTheme.TextSecondary)
+                    }
+                }
+            )
+        }
+
+        if (portfolioItemToDelete != null) {
+            AlertDialog(
+                onDismissRequest = { portfolioItemToDelete = null },
+                containerColor = BistTheme.CardBackground,
+                title = { Text("Varlığı Sil", color = BistTheme.TextPrimary, fontWeight = FontWeight.Bold) },
+                text = { Text("${portfolioItemToDelete!!.symbol} varlığını portföyünüzden silmek istediğinize emin misiniz?", color = BistTheme.TextSecondary) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deletePortfolioItem(portfolioItemToDelete!!.id)
+                            portfolioItemToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BistTheme.Red),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Sil", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { portfolioItemToDelete = null }) {
+                        Text("İptal", color = BistTheme.TextSecondary)
+                    }
+                }
+            )
+        }
+
+        if (selectedStockForDetails != null) {
+            StockDetailsDialog(
+                stock = selectedStockForDetails!!,
+                viewModel = viewModel,
+                onDismiss = { selectedStockForDetails = null },
+                onAddAlarmClick = {
+                    selectedStockForAlarm = selectedStockForDetails!!.hisse
+                    selectedStockForDetails = null
+                    showAddAlarmDialog = true
+                }
+            )
+        }
     }
 }
 
@@ -950,13 +1189,21 @@ fun UrlSettingDialog(
 @Composable
 fun AddAlarmDialog(
     preselectedStock: String?,
-    stocksList: List<String>,
+    allStocks: List<StockInfo>,
     onDismiss: () -> Unit,
     onSave: (String, AlarmType, Double) -> Unit
 ) {
     var stockCode by remember { mutableStateOf(preselectedStock ?: "") }
     var valueText by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(AlarmType.PRICE_ABOVE) }
+
+    var expanded by remember { mutableStateOf(false) }
+    val filteredSuggestions = remember(stockCode) {
+        if (stockCode.isEmpty()) emptyList()
+        else allStocks.filter { 
+            it.hisse.contains(stockCode, ignoreCase = true) || it.sirket.contains(stockCode, ignoreCase = true) 
+        }.take(5)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -974,21 +1221,44 @@ fun AddAlarmDialog(
                         color = BistTheme.Accent
                     )
                 } else {
-                    OutlinedTextField(
-                        value = stockCode,
-                        onValueChange = { stockCode = it },
-                        label = { Text("Hisse Kodu (örn. THYAO)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = BistTheme.TextPrimary,
-                            unfocusedTextColor = BistTheme.TextPrimary,
-                            focusedLabelColor = BistTheme.PrimaryLight,
-                            unfocusedLabelColor = BistTheme.TextSecondary,
-                            focusedBorderColor = BistTheme.PrimaryLight,
-                            unfocusedBorderColor = BistTheme.CardBorder
+                    Box {
+                        OutlinedTextField(
+                            value = stockCode,
+                            onValueChange = { 
+                                stockCode = it 
+                                expanded = true
+                            },
+                            label = { Text("Hisse veya Kripto Kodu (Örn: THYAO, BTC-USD)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = BistTheme.TextPrimary,
+                                unfocusedTextColor = BistTheme.TextPrimary,
+                                focusedLabelColor = BistTheme.PrimaryLight,
+                                unfocusedLabelColor = BistTheme.TextSecondary,
+                                focusedBorderColor = BistTheme.PrimaryLight,
+                                unfocusedBorderColor = BistTheme.CardBorder
+                            )
                         )
-                    )
+
+                        DropdownMenu(
+                            expanded = expanded && filteredSuggestions.isNotEmpty(),
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .background(BistTheme.CardBackground)
+                        ) {
+                            filteredSuggestions.forEach { stock ->
+                                DropdownMenuItem(
+                                    text = { Text("${stock.hisse} - ${stock.sirket}", color = BistTheme.TextPrimary, fontSize = 13.sp) },
+                                    onClick = {
+                                        stockCode = stock.hisse
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Text("Alarm Koşulu:", fontWeight = FontWeight.Bold, color = BistTheme.TextPrimary)
@@ -1383,6 +1653,234 @@ fun StockDetailsDialog(
                         }
                     }
                 }
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PortfolioCard(
+    item: PortfolioItem,
+    currentStock: StockInfo?,
+    onDelete: () -> Unit
+) {
+    val currentPrice = currentStock?.fiyat ?: item.buyPrice
+    val totalCost = item.amount * item.buyPrice
+    val currentValue = item.amount * currentPrice
+    val profitLoss = currentValue - totalCost
+    val profitPercent = if (totalCost > 0) (profitLoss / totalCost) * 100.0 else 0.0
+
+    val isCryptoOrUsd = item.symbol.contains("-USD") || item.symbol.contains("/USD")
+    val symbolChar = if (isCryptoOrUsd) "$" else "₺"
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .border(1.dp, BistTheme.CardBorder, RoundedCornerShape(20.dp)),
+        colors = CardDefaults.cardColors(containerColor = BistTheme.CardBackground)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = item.symbol,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = BistTheme.TextPrimary
+                    )
+                    Text(
+                        text = "${String.format(java.util.Locale.US, "%.2f", item.amount)} Lot / Adet",
+                        fontSize = 12.sp,
+                        color = BistTheme.TextSecondary
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isPositive = profitLoss >= 0
+                    val profitColor = if (isPositive) BistTheme.Green else BistTheme.Red
+                    val sign = if (isPositive) "+" else ""
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "$sign${String.format(java.util.Locale.US, "%.2f", profitLoss)} $symbolChar",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Black,
+                            color = profitColor
+                        )
+                        Text(
+                            text = "%$sign${String.format(java.util.Locale.US, "%.2f", profitPercent)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = profitColor
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Sil",
+                            tint = BistTheme.TextSecondary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = BistTheme.CardBorder, thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("ALIŞ FİYATI", fontSize = 9.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                    Text("${String.format(java.util.Locale.US, "%.2f", item.buyPrice)} $symbolChar", fontSize = 13.sp, color = BistTheme.TextPrimary, fontWeight = FontWeight.Bold)
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("GÜNCEL FİYAT", fontSize = 9.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                    Text("${String.format(java.util.Locale.US, "%.2f", currentPrice)} $symbolChar", fontSize = 13.sp, color = BistTheme.TextPrimary, fontWeight = FontWeight.Bold)
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("TOPLAM DEĞER", fontSize = 9.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                    Text("${String.format(java.util.Locale.US, "%.2f", currentValue)} $symbolChar", fontSize = 13.sp, color = BistTheme.TextPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddPortfolioDialog(
+    allStocks: List<StockInfo>,
+    onDismiss: () -> Unit,
+    onSave: (symbol: String, amount: Double, buyPrice: Double) -> Unit
+) {
+    var symbol by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var buyPriceText by remember { mutableStateOf("") }
+
+    var expanded by remember { mutableStateOf(false) }
+    val filteredSuggestions = remember(symbol) {
+        if (symbol.isEmpty()) emptyList()
+        else allStocks.filter { 
+            it.hisse.contains(symbol, ignoreCase = true) || it.sirket.contains(symbol, ignoreCase = true) 
+        }.take(5)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BistTheme.CardBackground,
+        title = {
+            Text("Portföye Varlık Ekle", color = BistTheme.TextPrimary, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box {
+                    OutlinedTextField(
+                        value = symbol,
+                        onValueChange = { 
+                            symbol = it 
+                            expanded = true
+                        },
+                        label = { Text("Hisse veya Kripto Kodu (Örn: THYAO, BTC-USD)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = BistTheme.TextPrimary,
+                            unfocusedTextColor = BistTheme.TextPrimary,
+                            focusedLabelColor = BistTheme.PrimaryLight,
+                            unfocusedLabelColor = BistTheme.TextSecondary,
+                            focusedBorderColor = BistTheme.PrimaryLight,
+                            unfocusedBorderColor = BistTheme.CardBorder
+                        )
+                    )
+
+                    DropdownMenu(
+                        expanded = expanded && filteredSuggestions.isNotEmpty(),
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .background(BistTheme.CardBackground)
+                    ) {
+                        filteredSuggestions.forEach { stock ->
+                            DropdownMenuItem(
+                                text = { Text("${stock.hisse} - ${stock.sirket}", color = BistTheme.TextPrimary, fontSize = 13.sp) },
+                                onClick = {
+                                    symbol = stock.hisse
+                                    buyPriceText = stock.fiyat.toString()
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Miktar / Lot Adedi") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = BistTheme.TextPrimary,
+                        unfocusedTextColor = BistTheme.TextPrimary,
+                        focusedLabelColor = BistTheme.PrimaryLight,
+                        unfocusedLabelColor = BistTheme.TextSecondary,
+                        focusedBorderColor = BistTheme.PrimaryLight,
+                        unfocusedBorderColor = BistTheme.CardBorder
+                    )
+                )
+
+                OutlinedTextField(
+                    value = buyPriceText,
+                    onValueChange = { buyPriceText = it },
+                    label = { Text("Alış Fiyatı (TL / USD)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = BistTheme.TextPrimary,
+                        unfocusedTextColor = BistTheme.TextPrimary,
+                        focusedLabelColor = BistTheme.PrimaryLight,
+                        unfocusedLabelColor = BistTheme.TextSecondary,
+                        focusedBorderColor = BistTheme.PrimaryLight,
+                        unfocusedBorderColor = BistTheme.CardBorder
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amount = amountText.replace(",", ".").toDoubleOrNull() ?: 0.0
+                    val buyPrice = buyPriceText.replace(",", ".").toDoubleOrNull() ?: 0.0
+                    if (symbol.isNotEmpty() && amount > 0 && buyPrice > 0) {
+                        onSave(symbol, amount, buyPrice)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BistTheme.Green),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Ekle", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("İptal", color = BistTheme.TextSecondary)
             }
         }
     )

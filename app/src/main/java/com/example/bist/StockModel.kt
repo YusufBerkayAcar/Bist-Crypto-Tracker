@@ -32,3 +32,10 @@ data class SingleTrendResponse(
     @SerializedName("trend") val trend: List<Double>,
     @SerializedName("dates") val dates: List<String> = emptyList()
 )
+
+data class PortfolioItem(
+    val id: String = UUID.randomUUID().toString(),
+    val symbol: String,          // Örn: THYAO veya BTC-USD
+    val amount: Double,          // Lot veya Adet miktarı
+    val buyPrice: Double         // Alış Fiyatı (TL veya USD)
+)
