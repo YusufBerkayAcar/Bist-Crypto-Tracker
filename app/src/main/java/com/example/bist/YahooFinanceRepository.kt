@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -14,8 +15,13 @@ import java.util.concurrent.TimeUnit
 object YahooFinanceRepository {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .connectionPool(okhttp3.ConnectionPool(60, 5, TimeUnit.MINUTES))
+        .dispatcher(okhttp3.Dispatcher().apply {
+            maxRequests = 128
+            maxRequestsPerHost = 40
+        })
         .build()
 
     // BIST hisse senetleri (Sembol -> Şirket Adı Eşleştirmesi)
@@ -756,8 +762,6 @@ object YahooFinanceRepository {
         "CTK-USD" to "Shentu",
         "SHIB-USD" to "Shiba Inu",
         "PEPE-USD" to "Pepe",
-        "AVAX-USD" to "Avalanche",
-        "FLOKI-USD" to "Floki",
         "BONK-USD" to "Bonk"
     )
 
@@ -769,7 +773,7 @@ object YahooFinanceRepository {
             val cleanCode = info.hisse.removeSuffix(".IS")
             val companyName = bistStocksMap[cleanCode] ?: cleanCode
             info.copy(hisse = cleanCode, sirket = companyName)
-        }
+        }.sortedBy { it.hisse }
     }
 
     suspend fun fetchIndices(): List<StockInfo> = withContext(Dispatchers.IO) {
@@ -834,7 +838,7 @@ object YahooFinanceRepository {
         result.map { info ->
             val name = cryptosMap[info.hisse] ?: info.sirket
             info.copy(sirket = name)
-        }
+        }.sortedBy { it.hisse }
     }
 
     suspend fun fetchSingleTrend(ticker: String, range: String): SingleTrendResponse = withContext(Dispatchers.IO) {
@@ -931,17 +935,20 @@ object YahooFinanceRepository {
         if (symbols.isEmpty()) return@withContext emptyList()
 
         val stockList = java.util.Collections.synchronizedList(mutableListOf<StockInfo>())
+        val startTime = System.currentTimeMillis()
+        val semaphore = Semaphore(30)
 
         coroutineScope {
             val jobs = symbols.map { symbol ->
                 async {
-                    val url = "https://query1.finance.yahoo.com/v8/finance/chart/$symbol?range=1d&interval=1d"
-                    val request = Request.Builder()
-                        .url(url)
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                        .build()
-
+                    semaphore.acquire()
                     try {
+                        val url = "https://query1.finance.yahoo.com/v8/finance/chart/$symbol?range=1d&interval=1d"
+                        val request = Request.Builder()
+                            .url(url)
+                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                            .build()
+
                         val response = client.newCall(request).execute()
                         val body = response.body()?.string() ?: return@async
 
@@ -972,11 +979,16 @@ object YahooFinanceRepository {
                         }
                     } catch (e: Exception) {
                         Log.e("YahooRepository", "Error fetching Yahoo Finance data for $symbol", e)
+                    } finally {
+                        semaphore.release()
                     }
                 }
             }
             jobs.awaitAll()
         }
+
+        val elapsed = System.currentTimeMillis() - startTime
+        Log.d("YahooRepository", "Fetched ${stockList.size} / ${symbols.size} quotes in ${elapsed}ms")
 
         stockList
     }
