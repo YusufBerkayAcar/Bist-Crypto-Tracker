@@ -6,6 +6,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -30,8 +32,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -1505,23 +1511,23 @@ fun StockDetailsDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
+                val isCryptoOrUsd = stock.hisse.contains("-USD") || stock.hisse.contains("/USD") || stock.hisse == "XAU/USD"
+                val isIndex = stock.hisse.startsWith("XU") || stock.hisse.startsWith("^")
+                val detailCurrencySymbol = when {
+                    isIndex -> ""
+                    isCryptoOrUsd -> "$"
+                    else -> "₺"
+                }
+                val detailPriceFormatted = when {
+                    isIndex -> String.format(java.util.Locale.US, "%.2f", stock.fiyat)
+                    isCryptoOrUsd -> "$detailCurrencySymbol${String.format(java.util.Locale.US, "%.2f", stock.fiyat)}"
+                    else -> "${String.format(java.util.Locale.US, "%.2f", stock.fiyat)} ₺"
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    val isCryptoOrUsd = stock.hisse.contains("-USD") || stock.hisse.contains("/USD") || stock.hisse == "XAU/USD"
-                    val isIndex = stock.hisse.startsWith("XU") || stock.hisse.startsWith("^")
-                    val detailCurrencySymbol = when {
-                        isIndex -> ""
-                        isCryptoOrUsd -> "$"
-                        else -> "₺"
-                    }
-                    val detailPriceFormatted = when {
-                        isIndex -> String.format(java.util.Locale.US, "%.2f", stock.fiyat)
-                        isCryptoOrUsd -> "$detailCurrencySymbol${String.format(java.util.Locale.US, "%.2f", stock.fiyat)}"
-                        else -> "${String.format(java.util.Locale.US, "%.2f", stock.fiyat)} ₺"
-                    }
-
                     Column {
                         Text("GÜNCEL FİYAT", fontSize = 10.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
                         Text(detailPriceFormatted, fontSize = 20.sp, fontWeight = FontWeight.Black, color = BistTheme.TextPrimary)
@@ -1536,9 +1542,39 @@ fun StockDetailsDialog(
                     }
                 }
 
+                // Seçilen zaman dilimine göre değişim oranı
+                val periodChangeLabel = when(selectedTimeframe) {
+                    "1d" -> "GÜNLÜK DEĞİŞİM"
+                    "1w" -> "HAFTALIK DEĞİŞİM"
+                    "1mo" -> "AYLIK DEĞİŞİM"
+                    "3mo" -> "3 AYLIK DEĞİŞİM"
+                    "1y" -> "YILLIK DEĞİŞİM"
+                    else -> "DEĞİŞİM"
+                }
+
+                // Trend verisinden dönemsel değişim hesapla
+                val periodChangePercent = if (selectedTimeframe == "1d") {
+                    stock.degisim
+                } else if (activeTrend != null && activeTrend!!.size > 1) {
+                    val firstPrice = activeTrend!!.first()
+                    val lastPrice = activeTrend!!.last()
+                    if (firstPrice > 0) ((lastPrice - firstPrice) / firstPrice) * 100.0 else 0.0
+                } else {
+                    null // Henüz yüklenmiyor
+                }
+
+                val periodPriceChange = if (selectedTimeframe == "1d") {
+                    null
+                } else if (activeTrend != null && activeTrend!!.size > 1) {
+                    activeTrend!!.last() - activeTrend!!.first()
+                } else {
+                    null
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
                         Text("İŞLEM HACMİ", fontSize = 10.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
@@ -1549,6 +1585,60 @@ fun StockDetailsDialog(
                             else -> String.format(java.util.Locale.US, "%.0f", stock.hacim)
                         }
                         Text(formattedHacim, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BistTheme.TextPrimary)
+                    }
+
+                    if (selectedTimeframe != "1d") {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(periodChangeLabel, fontSize = 10.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            if (isTrendLoading || periodChangePercent == null) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = BistTheme.PrimaryLight,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (periodPriceChange != null) {
+                                        val priceChangeSign = if (periodPriceChange >= 0) "+" else ""
+                                        val priceChangeSuffix = when {
+                                            isIndex -> ""
+                                            isCryptoOrUsd -> " $"
+                                            else -> " ₺"
+                                        }
+                                        Text(
+                                            text = "$priceChangeSign${String.format(java.util.Locale.US, "%.2f", periodPriceChange)}$priceChangeSuffix",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = BistTheme.TextSecondary
+                                        )
+                                    }
+
+                                    val isPeriodPositive = periodChangePercent >= 0
+                                    val periodBadgeColor = if (isPeriodPositive) BistTheme.Green else BistTheme.Red
+                                    val periodBadgeBg = if (isPeriodPositive) BistTheme.GreenBg else BistTheme.RedBg
+                                    val periodSign = if (isPeriodPositive) "+" else ""
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(periodBadgeBg.copy(alpha = 0.4f))
+                                            .border(0.5.dp, periodBadgeColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "$periodSign${String.format(java.util.Locale.US, "%.2f", periodChangePercent)}%",
+                                            color = periodBadgeColor,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1606,10 +1696,79 @@ fun StockDetailsDialog(
                     }
                 }
 
+                // Interactive Chart with touch crosshair
+                var touchedIndex by remember { mutableStateOf<Int?>(null) }
+
+                // Dokunulan noktadaki fiyat ve tarih bilgisi tooltip
+                if (touchedIndex != null && activeTrend != null && activeTrend!!.size > 1) {
+                    val idx = touchedIndex!!.coerceIn(0, activeTrend!!.size - 1)
+                    val touchedPrice = activeTrend!![idx]
+                    val touchedDate = if (activeDates != null && idx < activeDates!!.size) activeDates!![idx] else ""
+                    val currSuffix = when {
+                        isIndex -> ""
+                        isCryptoOrUsd -> " $"
+                        else -> " ₺"
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(1.dp, BistTheme.Accent.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                        colors = CardDefaults.cardColors(containerColor = BistTheme.Accent.copy(alpha = 0.08f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("TARİH", fontSize = 8.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                                Text(touchedDate, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = BistTheme.Accent)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("FİYAT", fontSize = 8.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "${String.format(java.util.Locale.US, "%.2f", touchedPrice)}$currSuffix",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = BistTheme.TextPrimary
+                                )
+                            }
+                            // Başlangıca göre değişim
+                            if (activeTrend!!.first() > 0) {
+                                val chgFromStart = ((touchedPrice - activeTrend!!.first()) / activeTrend!!.first()) * 100.0
+                                val chgPositive = chgFromStart >= 0
+                                val chgSign = if (chgPositive) "+" else ""
+                                val chgColor = if (chgPositive) BistTheme.Green else BistTheme.Red
+                                val chgBg = if (chgPositive) BistTheme.GreenBg else BistTheme.RedBg
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("DEĞİŞİM", fontSize = 8.sp, color = BistTheme.TextSecondary, fontWeight = FontWeight.Bold)
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(chgBg.copy(alpha = 0.4f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            "$chgSign${String.format(java.util.Locale.US, "%.2f", chgFromStart)}%",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = chgColor
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(150.dp)
+                        .height(180.dp)
                         .border(1.dp, BistTheme.CardBorder, RoundedCornerShape(12.dp)),
                     colors = CardDefaults.cardColors(containerColor = BistTheme.Background)
                 ) {
@@ -1625,23 +1784,60 @@ fun StockDetailsDialog(
                             val maxVal = trendData.maxOrNull() ?: 0.0
                             val delta = maxVal - minVal
 
-                            val is30DayPositive = if (trendData.isNotEmpty()) {
+                            val isPeriodPositive = if (trendData.isNotEmpty()) {
                                 trendData.last() >= trendData.first()
                             } else {
                                 stock.degisim >= 0
                             }
-                            val chartColor = if (is30DayPositive) BistTheme.Green else BistTheme.Red
+                            val chartColor = if (isPeriodPositive) BistTheme.Green else BistTheme.Red
 
                             Column(modifier = Modifier.fillMaxSize()) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text("En Düşük: ${String.format(java.util.Locale.US, "%.2f", minVal)} ₺", fontSize = 9.sp, color = BistTheme.TextSecondary)
-                                    Text("En Yüksek: ${String.format(java.util.Locale.US, "%.2f", maxVal)} ₺", fontSize = 9.sp, color = BistTheme.TextSecondary)
+                                    val priceSuffix = when {
+                                        isIndex -> ""
+                                        isCryptoOrUsd -> " $"
+                                        else -> " ₺"
+                                    }
+                                    Text("En Düşük: ${String.format(java.util.Locale.US, "%.2f", minVal)}$priceSuffix", fontSize = 9.sp, color = BistTheme.TextSecondary)
+                                    Text("En Yüksek: ${String.format(java.util.Locale.US, "%.2f", maxVal)}$priceSuffix", fontSize = 9.sp, color = BistTheme.TextSecondary)
                                 }
 
-                                Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .weight(1f)
+                                        .pointerInput(trendData) {
+                                            detectDragGestures(
+                                                onDragStart = { offset ->
+                                                    val stepX = size.width.toFloat() / (trendData.size - 1).coerceAtLeast(1)
+                                                    val idx = (offset.x / stepX).toInt().coerceIn(0, trendData.size - 1)
+                                                    touchedIndex = idx
+                                                },
+                                                onDrag = { change, _ ->
+                                                    change.consume()
+                                                    val stepX = size.width.toFloat() / (trendData.size - 1).coerceAtLeast(1)
+                                                    val idx = (change.position.x / stepX).toInt().coerceIn(0, trendData.size - 1)
+                                                    touchedIndex = idx
+                                                },
+                                                onDragEnd = {
+                                                    touchedIndex = null
+                                                },
+                                                onDragCancel = {
+                                                    touchedIndex = null
+                                                }
+                                            )
+                                        }
+                                        .pointerInput(trendData) {
+                                            detectTapGestures { offset ->
+                                                val stepX = size.width.toFloat() / (trendData.size - 1).coerceAtLeast(1)
+                                                val idx = (offset.x / stepX).toInt().coerceIn(0, trendData.size - 1)
+                                                touchedIndex = if (touchedIndex == idx) null else idx
+                                            }
+                                        }
+                                ) {
                                     Canvas(modifier = Modifier.fillMaxSize()) {
                                         val width = size.width
                                         val height = size.height
@@ -1650,11 +1846,14 @@ fun StockDetailsDialog(
                                         val stepX = width / (trendData.size - 1)
                                         val effectiveDelta = if (delta > 0.0) delta else 1.0
 
+                                        // Y koordinatlarını hesapla (crosshair için lazım)
+                                        val yPoints = mutableListOf<Float>()
                                         for (index in trendData.indices) {
                                             val price = trendData[index]
                                             val x = index * stepX
                                             val normalizedY = (price - minVal) / effectiveDelta
                                             val y = (height - (normalizedY * height * 0.8f + height * 0.1f)).toFloat()
+                                            yPoints.add(y)
                                             if (index == 0) {
                                                 path.moveTo(x, y)
                                             } else {
@@ -1662,6 +1861,7 @@ fun StockDetailsDialog(
                                             }
                                         }
 
+                                        // Gradient dolgu
                                         val fillPath = androidx.compose.ui.graphics.Path().apply {
                                             addPath(path)
                                             lineTo(width, height)
@@ -1671,18 +1871,65 @@ fun StockDetailsDialog(
                                         drawPath(
                                             path = fillPath,
                                             brush = Brush.verticalGradient(
-                                                colors = listOf(chartColor.copy(alpha = 0.2f), Color.Transparent)
+                                                colors = listOf(chartColor.copy(alpha = 0.25f), Color.Transparent)
                                             )
                                         )
 
+                                        // Ana çizgi
                                         drawPath(
                                             path = path,
                                             color = chartColor,
-                                            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                            style = Stroke(
                                                 width = 2.5.dp.toPx(),
                                                 cap = androidx.compose.ui.graphics.StrokeCap.Round
                                             )
                                         )
+
+                                        // Crosshair göstergesi
+                                        if (touchedIndex != null) {
+                                            val idx = touchedIndex!!.coerceIn(0, trendData.size - 1)
+                                            val crossX = idx * stepX
+                                            val crossY = yPoints[idx]
+
+                                            // Dikey kesikli çizgi
+                                            drawLine(
+                                                color = BistTheme.Accent.copy(alpha = 0.6f),
+                                                start = Offset(crossX, 0f),
+                                                end = Offset(crossX, height),
+                                                strokeWidth = 1.dp.toPx(),
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+                                            )
+
+                                            // Yatay kesikli çizgi
+                                            drawLine(
+                                                color = BistTheme.Accent.copy(alpha = 0.3f),
+                                                start = Offset(0f, crossY),
+                                                end = Offset(width, crossY),
+                                                strokeWidth = 1.dp.toPx(),
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                                            )
+
+                                            // Dış halka (glow efekti)
+                                            drawCircle(
+                                                color = BistTheme.Accent.copy(alpha = 0.15f),
+                                                radius = 12.dp.toPx(),
+                                                center = Offset(crossX, crossY)
+                                            )
+
+                                            // İç dolu nokta
+                                            drawCircle(
+                                                color = BistTheme.Accent,
+                                                radius = 5.dp.toPx(),
+                                                center = Offset(crossX, crossY)
+                                            )
+
+                                            // Beyaz çekirdek
+                                            drawCircle(
+                                                color = Color.White,
+                                                radius = 2.5.dp.toPx(),
+                                                center = Offset(crossX, crossY)
+                                            )
+                                        }
                                     }
                                 }
 
@@ -1692,6 +1939,10 @@ fun StockDetailsDialog(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(activeDates!!.first(), fontSize = 9.sp, color = BistTheme.TextSecondary)
+                                        if (activeDates!!.size > 2) {
+                                            val midIdx = activeDates!!.size / 2
+                                            Text(activeDates!![midIdx], fontSize = 9.sp, color = BistTheme.TextSecondary)
+                                        }
                                         Text(activeDates!!.last(), fontSize = 9.sp, color = BistTheme.TextSecondary)
                                     }
                                 }

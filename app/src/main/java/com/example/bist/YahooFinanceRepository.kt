@@ -897,6 +897,15 @@ object YahooFinanceRepository {
                 }
 
                 if (timestamps != null && closes != null) {
+                    val trTimeZone = java.util.TimeZone.getTimeZone("Europe/Istanbul")
+                    val dateFormat = when (range) {
+                        "1d" -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                        "1w" -> java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.US)
+                        else -> java.text.SimpleDateFormat("dd.MM.yy", java.util.Locale.US)
+                    }.apply {
+                        timeZone = trTimeZone
+                    }
+
                     for (i in 0 until closes.length()) {
                         val closeVal = closes.optDouble(i, Double.NaN)
                         val timestamp = timestamps.optLong(i, 0L)
@@ -905,18 +914,8 @@ object YahooFinanceRepository {
                             val finalPrice = if (clean == "XAU/TRY") (closeVal / 31.1035) * usdRate else closeVal
                             prices.add(Math.round(finalPrice * 100) / 100.0)
 
-                            val dateObj = java.util.Date((timestamp + 3 * 3600) * 1000)
-                            val dateStr = if (effectiveRange == "1d" || effectiveRange == "5d") {
-                                val hr = String.format(java.util.Locale.US, "%02d", dateObj.hours)
-                                val min = String.format(java.util.Locale.US, "%02d", dateObj.minutes)
-                                "$hr:$min"
-                            } else {
-                                val day = String.format(java.util.Locale.US, "%02d", dateObj.date)
-                                val month = String.format(java.util.Locale.US, "%02d", dateObj.month + 1)
-                                val yr = (dateObj.year + 1900).toString().takeLast(2)
-                                "$day.$month.$yr"
-                            }
-                            dates.add(dateStr)
+                            val dateObj = java.util.Date(timestamp * 1000L)
+                            dates.add(dateFormat.format(dateObj))
                         }
                     }
                 }
